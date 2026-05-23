@@ -1376,12 +1376,12 @@ async function handleRoll() {
   }
 
   // Grey Zone (48-51): roll before movement each turn while still in the zone.
-  if (player.position >= 48 && player.position <= 51) {
+  if (player.position >= 48 && player.position <= 51 && !player.awaitingSafariMovementRoll) {
     const safariRoll = getDiceRoll();
 
     if (safariRoll <= 2) {
       logLine(`${player.name} rolled a ${safariRoll} in the Safari Zone (1-2): throw bait and give 1 drink.`);
-      rollResult.textContent = `${player.name} rolled a ${safariRoll} in the Safari Zone. Throw bait: give 1 drink.`;
+      rollResult.textContent = `${player.name} rolled a ${safariRoll} in the Safari Zone. Throw bait: give 1 drink. Now roll for movement.`;
     } else if (safariRoll <= 4) {
       logLine(`${player.name} rolled a ${safariRoll} in the Safari Zone (3-4): throw a rock, lose turn, drink 4.`);
       rollResult.textContent = `${player.name} rolled a ${safariRoll} in the Safari Zone. Throw a rock: lose this turn and drink 4.`;
@@ -1390,9 +1390,15 @@ async function handleRoll() {
       return;
     } else {
       logLine(`${player.name} rolled a ${safariRoll} in the Safari Zone (5-6): throw a safari ball and drink 2.`);
-      rollResult.textContent = `${player.name} rolled a ${safariRoll} in the Safari Zone. Throw a safari ball: drink 2.`;
+      rollResult.textContent = `${player.name} rolled a ${safariRoll} in the Safari Zone. Throw a safari ball: drink 2. Now roll for movement.`;
     }
+
+    player.awaitingSafariMovementRoll = true;
+    rollButton.disabled = false;
+    return;
   }
+
+  player.awaitingSafariMovementRoll = false;
 
   const originalDie = getDiceRoll();
   let movement = originalDie;
@@ -1550,6 +1556,7 @@ function startGame() {
       awaitingSpace18DrinksRoll: false,
       space18TurnsMissed: 0,
       awaitingSpace19Roll: false,
+      awaitingSafariMovementRoll: false,
       awaitingSpace30Roll: false,
       awaitingSpace40Roll: false,
       awaitingSpace49Roll: false,
