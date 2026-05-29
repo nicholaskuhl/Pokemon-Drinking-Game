@@ -175,7 +175,7 @@ function buildSpaces() {
     "Challenge someone to a chugging contest. First to finish gets an extra turn, last to finish loses a turn.",
     "Krabby used Crabhammer! Bring down the Crabhammer on someone; they must finish their drink.",
     "Ditto used Transform! During the next person's turn, you must copy everything they do!",
-    "Doduo used Double-Edge! On your next turn, you give 4 drinks, but you take 1 drink.",
+    "Doduo used Double-Edge! You give 4 drinks, but you drink 1.",
     "Safari Zone. Before each turn in the Safari Zone, roll a die. 1-2: You throw bait. Give 1 drink to someone. 3-4: You throw a rock, dick. Lose your turn, drink 4. 5-6: You throw a safari ball. Drink 2 in sadness, because safari balls are just awful.",
     "Gone fishin'... A wild Dratini appeared! Roll a 1 to catch it. Otherwise, drink 1.",
     "A wild Taurus appeared... but instantly fled. Drink 2 for not being quick enough.",
@@ -266,6 +266,21 @@ function addTokenMarker(player) {
   token.dataset.playerId = player.id;
   token.style.left = `${boardPositions[player.position].x}%`;
   token.style.top = `${boardPositions[player.position].y}%`;
+  
+  // Calculate offset for multiple tokens at same position
+  const playersAtPosition = players.filter(p => p.position === player.position);
+  const playerIndex = playersAtPosition.findIndex(p => p.id === player.id);
+  const totalPlayers = playersAtPosition.length;
+  
+  if (totalPlayers > 1) {
+    // Arrange tokens in a circle around the position
+    const angle = (playerIndex / totalPlayers) * Math.PI * 2;
+    const radius = 15; // pixels offset
+    const offsetX = Math.cos(angle) * radius;
+    const offsetY = Math.sin(angle) * radius;
+    token.style.transform = `translate(${offsetX}px, ${offsetY}px)`;
+  }
+  
   token.textContent = player.initial;
   boardOverlay.append(token);
 }
@@ -341,6 +356,63 @@ function showConfusionChoice() {
       choiceDiv.appendChild(btn);
     }
   });
+  choiceDiv.classList.remove('hidden');
+}
+
+function showChuggingChoice() {
+  const choiceDiv = document.getElementById('player-choice');
+  choiceDiv.innerHTML = '<p>Challenge someone to a chugging contest:</p>';
+  players.forEach(p => {
+    if (p.id !== players[currentPlayerIndex].id) {
+      const btn = document.createElement('button');
+      btn.textContent = p.name;
+      btn.addEventListener('click', () => {
+        players[currentPlayerIndex].chuggingOpponent = p.id;
+        players[currentPlayerIndex].awaitingChuggingChoice = false;
+        players[currentPlayerIndex].awaitingChuggingResult = true;
+        choiceDiv.classList.add('hidden');
+        showChuggingResult();
+      });
+      choiceDiv.appendChild(btn);
+    }
+  });
+  choiceDiv.classList.remove('hidden');
+}
+
+function showChuggingResult() {
+  const choiceDiv = document.getElementById('player-choice');
+  const player = players[currentPlayerIndex];
+  const opponent = players.find(p => p.id === player.chuggingOpponent);
+  choiceDiv.innerHTML = `<p>Did ${opponent.name} win the chugging contest?</p>`;
+  
+  const yesBtn = document.createElement('button');
+  yesBtn.textContent = 'Yes';
+  yesBtn.addEventListener('click', () => {
+    opponent.extraTurn = true;
+    logLine(`${opponent.name} won the chugging contest and gets an extra turn!`);
+    rollResult.textContent = `${opponent.name} wins! They get an extra turn.`;
+    player.awaitingChuggingResult = false;
+    player.chuggingOpponent = null;
+    choiceDiv.classList.add('hidden');
+    rollButton.disabled = true;
+    nextTurnButton.disabled = false;
+  });
+  choiceDiv.appendChild(yesBtn);
+  
+  const noBtn = document.createElement('button');
+  noBtn.textContent = 'No';
+  noBtn.addEventListener('click', () => {
+    player.extraTurn = true;
+    logLine(`${player.name} won the chugging contest and gets an extra turn!`);
+    rollResult.textContent = `${player.name} wins! You get an extra turn.`;
+    player.awaitingChuggingResult = false;
+    player.chuggingOpponent = null;
+    choiceDiv.classList.add('hidden');
+    rollButton.disabled = false;
+    nextTurnButton.disabled = true;
+  });
+  choiceDiv.appendChild(noBtn);
+  
   choiceDiv.classList.remove('hidden');
 }
 
@@ -548,6 +620,30 @@ function getBattleRolls(starter, opponentStarter) {
 
 function findGreySection(position) {
   return greySections.find(({ start, end }) => position >= start && position <= end);
+}
+
+async function showDiceAnimation(rollValue) {
+  const diceRoller = document.getElementById('dice-roller');
+  const diceNumber = diceRoller.querySelector('.dice-number');
+  
+  diceRoller.classList.remove('hidden');
+  
+  // Flash through random numbers during animation
+  const flashInterval = setInterval(() => {
+    diceNumber.textContent = Math.floor(Math.random() * 6) + 1;
+  }, 80);
+  
+  // Wait for animation to complete (0.6s)
+  await new Promise(resolve => setTimeout(resolve, 600));
+  
+  // Stop flashing and show the final number
+  clearInterval(flashInterval);
+  diceNumber.textContent = rollValue;
+  
+  // Keep visible for a bit longer
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  
+  diceRoller.classList.add('hidden');
 }
 
 async function movePlayer(player, rolls, landingRoll = rolls) {
@@ -779,6 +875,14 @@ async function movePlayer(player, rolls, landingRoll = rolls) {
     }
   }
 
+  // Space 44: Chugging contest - Choose opponent and determine winner
+  if (finalLandedSpace.index === 44) {
+    player.awaitingChuggingChoice = true;
+    logLine(`${player.name} landed on the Chugging Contest. Choose an opponent.`);
+    rollResult.textContent = `${player.name} landed on the Chugging Contest! Choose a player to challenge.`;
+    showChuggingChoice();
+  }
+
   // Space 49: Dratini - Roll die to catch
   if (finalLandedSpace.index === 49) {
     player.awaitingSpace49Roll = true;
@@ -924,30 +1028,63 @@ async function movePlayer(player, rolls, landingRoll = rolls) {
   }
 }
 
-function battleIfNeeded(player) {
+async function battleIfNeeded(player) {
   const opponents = players.filter((other) => other.id !== player.id && other.position === player.position);
 
   if (!opponents.length) {
     return;
   }
-
-  const opponent = opponents[0];
   const space = spaces[player.position];
   if (space.color !== 'white' && space.color !== 'start') {
     return;
   }
 
-  const battle = getBattleRolls(player.starter, opponent.starter);
-  logLine(`${player.name} battles ${opponent.name} on ${space.name}!`);
-  logLine(`${player.name} rolled ${battle.myBest} (${battle.myRolls} roll${battle.myRolls > 1 ? 's' : ''}).`);
-  logLine(`${opponent.name} rolled ${battle.opponentBest} (${battle.opponentRolls} roll${battle.opponentRolls > 1 ? 's' : ''}).`);
+  // Show battle modal
+  const battleModal = document.getElementById('battle-modal');
+  const battleInfo = document.getElementById('battle-info');
+  const battleCloseBtn = document.getElementById('battle-close-btn');
+  const modalOverlay = battleModal.querySelector('.modal-overlay');
 
-  if (battle.myBest > battle.opponentBest) {
-    logLine(`${opponent.name} loses the battle and takes 2 drinks.`);
-  } else if (battle.myBest < battle.opponentBest) {
-    logLine(`${player.name} loses the battle and takes 2 drinks.`);
-  } else {
-    logLine('It is a tie. Both players take 1 drink.');
+  for (let i = 0; i < opponents.length; i += 1) {
+    const opponent = opponents[i];
+    const battle = getBattleRolls(player.starter, opponent.starter);
+    logLine(`${player.name} battles ${opponent.name} on ${space.name}!`);
+    logLine(`${player.name} rolled ${battle.myBest} (${battle.myRolls} roll${battle.myRolls > 1 ? 's' : ''}).`);
+    logLine(`${opponent.name} rolled ${battle.opponentBest} (${battle.opponentRolls} roll${battle.opponentRolls > 1 ? 's' : ''}).`);
+
+    let resultText = '';
+    if (battle.myBest > battle.opponentBest) {
+      resultText = `${opponent.name} loses the battle and takes 2 drinks.`;
+      logLine(resultText);
+    } else if (battle.myBest < battle.opponentBest) {
+      resultText = `${player.name} loses the battle and takes 2 drinks.`;
+      logLine(resultText);
+    } else {
+      resultText = 'It is a tie. Both players take 1 drink.';
+      logLine(resultText);
+    }
+
+    battleInfo.innerHTML = `
+      <p>Battle ${i + 1} of ${opponents.length}</p>
+      <p>Dice outcomes shown are the best rolls for each player (some players may have rolled multiple dice due to type advantages).</p>
+      <p><strong>${player.name}</strong> (${player.starter})<br>Rolled: <span style="font-size: 1.2rem; color: var(--pokered);">🎲 ${battle.myBest}</span></p>
+      <p><strong>vs</strong></p>
+      <p><strong>${opponent.name}</strong> (${opponent.starter})<br>Rolled: <span style="font-size: 1.2rem; color: var(--pokeblue);">🎲 ${battle.opponentBest}</span></p>
+      <p class="result">${resultText}</p>
+    `;
+
+    battleModal.classList.remove('hidden');
+
+    await new Promise((resolve) => {
+      const closeHandler = () => {
+        battleModal.classList.add('hidden');
+        battleCloseBtn.removeEventListener('click', closeHandler);
+        modalOverlay.removeEventListener('click', closeHandler);
+        resolve();
+      };
+      battleCloseBtn.addEventListener('click', closeHandler);
+      modalOverlay.addEventListener('click', closeHandler);
+    });
   }
 }
 
@@ -1188,11 +1325,11 @@ async function handleRoll() {
     const roll = getDiceRoll();
     logLine(`${player.name} rolled a ${roll}.`);
     if (roll >= 1 && roll <= 3) {
-      logLine(`${player.name} rolled ${roll} (1-3). They drink ${roll} drink${roll !== 1 ? 's' : ''}.`);
-      rollResult.textContent = `${player.name} rolled a ${roll}. Drink ${roll} drink${roll !== 1 ? 's' : ''}.`;
-    } else {
-      logLine(`${player.name} rolled ${roll} (4-6). They give ${roll} drink${roll !== 1 ? 's' : ''}.`);
+      logLine(`${player.name} rolled ${roll} (1-3). They give ${roll} drink${roll !== 1 ? 's' : ''}.`);
       rollResult.textContent = `${player.name} rolled a ${roll}. Give ${roll} drink${roll !== 1 ? 's' : ''}.`;
+    } else {
+      logLine(`${player.name} rolled ${roll} (4-6). They drink ${roll} drink${roll !== 1 ? 's' : ''}.`);
+      rollResult.textContent = `${player.name} rolled a ${roll}. Drink ${roll} drink${roll !== 1 ? 's' : ''}.`;
     }
     player.awaitingSpace40Roll = false;
     rollButton.disabled = true;
@@ -1345,6 +1482,22 @@ async function handleRoll() {
     return;
   }
 
+  // Check if player is awaiting chugging choice
+  if (player.awaitingChuggingChoice) {
+    showChuggingChoice();
+    rollButton.disabled = true;
+    nextTurnButton.disabled = true;
+    return;
+  }
+
+  // Check if player is awaiting chugging result
+  if (player.awaitingChuggingResult) {
+    showChuggingResult();
+    rollButton.disabled = true;
+    nextTurnButton.disabled = true;
+    return;
+  }
+
   // Check if player is awaiting evolution choice
   if (player.awaitingEvolution) {
     showEvolutionChoice();
@@ -1401,6 +1554,7 @@ async function handleRoll() {
   player.awaitingSafariMovementRoll = false;
 
   const originalDie = getDiceRoll();
+  await showDiceAnimation(originalDie);
   let movement = originalDie;
 
   // Special rule for space 8: if the player rolls 1 or 2, do not move and end turn.
@@ -1429,7 +1583,7 @@ async function handleRoll() {
   }
   
   const landedSpace = await movePlayer(player, movement, originalDie);
-  battleIfNeeded(player);
+  await battleIfNeeded(player);
   updateStatus();
   
   // Keep roll button enabled if player is awaiting any special rolls or choices
@@ -1441,7 +1595,7 @@ async function handleRoll() {
       player.awaitingSpace19Roll || player.awaitingSpace30Roll || player.awaitingSpace40Roll ||
       player.awaitingSpace49Roll || player.awaitingSpace51Roll || player.awaitingSpace58Roll ||
       player.awaitingSpace62Roll || player.awaitingSpace42DrinkRoll || player.awaitingEvolution || player.awaitingPlayerChoice ||
-      player.awaitingConfusionChoice || player.awaitingNumberPick || 
+      player.awaitingConfusionChoice || player.awaitingChuggingChoice || player.awaitingChuggingResult || player.awaitingNumberPick || 
       player.pickedNumber !== null || 
       player.favoritePokemonOnBoard === true || player.awaitingDrinkQuestion ||
       player.catchingLegendaryBirds || player.stuckOnEliteFour ||
@@ -1557,6 +1711,9 @@ function startGame() {
       space18TurnsMissed: 0,
       awaitingSpace19Roll: false,
       awaitingSafariMovementRoll: false,
+      awaitingChuggingChoice: false,
+      awaitingChuggingResult: false,
+      chuggingOpponent: null,
       awaitingSpace30Roll: false,
       awaitingSpace40Roll: false,
       awaitingSpace49Roll: false,

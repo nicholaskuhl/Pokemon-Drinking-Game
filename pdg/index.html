@@ -46,6 +46,11 @@
         <button id="roll-button" disabled>Roll Die</button>
         <button id="next-turn-button" disabled>End Turn</button>
         <button id="reset-button">Reset Game</button>
+        <div id="dice-roller" class="dice-roller hidden">
+          <div class="dice-animation">
+            <span class="dice-number">1</span>
+          </div>
+        </div>
         <div id="roll-result" class="roll-result"></div>
         <div id="player-choice" class="player-choice hidden"></div>
 
@@ -64,6 +69,15 @@
       <h2>Game Log</h2>
       <div id="game-log" class="game-log"></div>
     </section>
+
+    <div id="battle-modal" class="modal hidden">
+      <div class="modal-overlay"></div>
+      <div class="modal-content">
+        <h2>⚔️ Battle! ⚔️</h2>
+        <div id="battle-info" class="battle-info"></div>
+        <button id="battle-close-btn" class="primary">Continue Game</button>
+      </div>
+    </div>
   </main>
 
   <script src="game.js"></script>
