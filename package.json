@@ -1,0 +1,13 @@
+{
+  "name": "pokemon-drinking-game",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pokemon Drinking Game (multiplayer web app)",
+  "scripts": {
+    "start": "cd pdg/server && npm start",
+    "postinstall": "cd pdg/server && npm install --omit=dev"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

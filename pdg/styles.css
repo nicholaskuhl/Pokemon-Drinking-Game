@@ -85,6 +85,11 @@ p { margin: 0; }
   box-shadow: 0 8px 32px rgba(74,144,217,0.08), 0 2px 8px rgba(0,0,0,0.06);
 }
 
+.control-panel {
+  display: flex;
+  flex-direction: column;
+}
+
 /* ── Layout ── */
 .game-setup {
   display: grid;
@@ -494,3 +499,38 @@ button:disabled {
   body { padding: 12px; }
   h1 { font-size: 1rem; }
 }
+
+/* Online lobby */
+.online-lobby { margin-bottom: 16px; }
+.online-lobby h3 { margin: 0 0 6px; }
+.online-lobby .hint { color: var(--text-mid); font-size: 0.85rem; margin: 4px 0; }
+.online-controls {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: end;
+}
+.online-controls label { display: flex; flex-direction: column; font-size: 0.85rem; }
+.online-controls input, .online-controls select {
+  padding: 6px; border: 1px solid var(--panel-border); border-radius: 4px;
+}
+.online-controls .or { padding: 0 4px; color: var(--text-mid); align-self: center; }
+.online-status { margin-top: 8px; font-size: 0.9rem; color: var(--pokeblue-dark); min-height: 1.2em; }
+.online-roster { margin-top: 8px; padding: 8px; background: #f8fafc; border: 1px solid var(--panel-border); border-radius: 4px; }
+.online-roster ul { margin: 4px 0; padding-left: 18px; }
+.online-roster li.offline { color: var(--pokegray); }
+.online-roster li.offline::after { content: ' (offline)'; }
+
+/* Waiting-for-other-player overlay */
+.waiting-indicator {
+  background: #fef3c7; border: 1px solid #f59e0b; color: #92400e;
+  padding: 8px 12px; border-radius: 6px; margin-bottom: 8px; font-size: 0.9rem;
+}
+
+/* Mode picker (Create / Join / Local) */
+.mode-picker { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.mode-btn {
+  padding: 10px 14px; border: 2px solid var(--panel-border); border-radius: 6px;
+  background: #fff; cursor: pointer; font-weight: 600;
+}
+.mode-btn:hover { border-color: var(--pokeblue); }
+.mode-btn.active { background: var(--pokeblue); color: #fff; border-color: var(--pokeblue-dark); }
+.mode-form { margin-top: 8px; }
+.mode-form h3 { margin: 0 0 8px; }

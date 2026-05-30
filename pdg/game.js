@@ -20,6 +20,58 @@ let players = [];
 let currentPlayerIndex = 0;
 let gameStarted = false;
 let boardPositions = [];
+let gameLogEntries = []; // newest-first list of log strings (mirrors DOM order)
+
+// Single canonical game state object. Exposed via getters/setters so the
+// existing top-level `let` variables keep working unchanged, while still
+// giving us one place to (de)serialize for network sync in later phases.
+const state = {
+  get players() { return players; },
+  set players(v) { players = v; },
+  get currentPlayerIndex() { return currentPlayerIndex; },
+  set currentPlayerIndex(v) { currentPlayerIndex = v; },
+  get gameStarted() { return gameStarted; },
+  set gameStarted(v) { gameStarted = v; },
+  get log() { return gameLogEntries; },
+  set log(v) { gameLogEntries = Array.isArray(v) ? v : []; }
+};
+
+// Serialize the parts of the state that should travel over the wire.
+function serializeState() {
+  return {
+    players: JSON.parse(JSON.stringify(players)),
+    currentPlayerIndex,
+    gameStarted,
+    log: gameLogEntries.slice()
+  };
+}
+
+// Replace local state with a snapshot from the server.
+// Does not re-render on its own; callers should call render() afterwards.
+function loadState(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return;
+  if (Array.isArray(snapshot.players)) players = snapshot.players;
+  if (Number.isInteger(snapshot.currentPlayerIndex)) currentPlayerIndex = snapshot.currentPlayerIndex;
+  if (typeof snapshot.gameStarted === 'boolean') gameStarted = snapshot.gameStarted;
+  if (Array.isArray(snapshot.log)) gameLogEntries = snapshot.log.slice();
+}
+
+// Single entry point to redraw the world from state. Safe to call any time.
+function render() {
+  renderLog();
+  refreshBoardTokens();
+  updateStatus();
+}
+
+function renderLog() {
+  if (!gameLog) return;
+  gameLog.innerHTML = '';
+  gameLogEntries.forEach((message) => {
+    const line = document.createElement('div');
+    line.textContent = message;
+    gameLog.append(line); // entries are newest-first, so append in order
+  });
+}
 
 const starterOptions = ['Charmander', 'Squirtle', 'Bulbasaur'];
 const specialSpaceMap = new Map();
@@ -560,9 +612,11 @@ function showEvolutionChoice() {
 }
 
 function logLine(message) {
+  gameLogEntries.unshift(message); // newest first
   const line = document.createElement('div');
   line.textContent = message;
   gameLog.prepend(line);
+  schedulePushState();
 }
 
 function updateStatus() {
@@ -592,7 +646,75 @@ function updateStatus() {
 }
 
 function getDiceRoll() {
+  // When networked, this drains from a queue of server-rolled dice fetched
+  // at the start of the current turn-action (see prefetchDiceIfOnline).
+  if (dicePrefetched.length > 0) return dicePrefetched.shift();
   return Math.floor(Math.random() * 6) + 1;
+}
+
+// ─── Networking integration (Path B "thin client") ───
+// All globals live in `state` (declared at top). When connected to a room,
+// the current player's browser fetches dice from the server and pushes a
+// fresh state snapshot after every action; other clients apply incoming
+// snapshots via loadState() + render().
+let dicePrefetched = [];
+let applyingRemoteSnapshot = false;
+let pendingPush = false;
+
+function isOnline() { return Boolean(window.net && window.net.online); }
+function myTurnOnline() {
+  if (!isOnline()) return true;
+  const idx = window.net.myIndex();
+  return idx === -1 || idx === currentPlayerIndex;
+}
+
+async function prefetchDiceIfOnline(count = 16) {
+  dicePrefetched = [];
+  if (!isOnline()) return;
+  try {
+    dicePrefetched = await window.net.fetchDice(count);
+  } catch (err) {
+    console.error('dice fetch failed; falling back to local', err);
+    dicePrefetched = [];
+  }
+}
+
+function schedulePushState() {
+  if (!isOnline()) return;
+  if (applyingRemoteSnapshot) return;
+  if (!myTurnOnline()) return;
+  if (pendingPush) return;
+  pendingPush = true;
+  Promise.resolve().then(() => {
+    pendingPush = false;
+    if (!isOnline()) return;
+    window.net.pushState(serializeState()).catch((err) => console.error('push state failed', err));
+  });
+}
+
+function applyRemoteSnapshot(snapshot) {
+  applyingRemoteSnapshot = true;
+  try {
+    loadState(snapshot);
+    if (gameStarted) {
+      const setup = document.querySelector('.game-setup');
+      if (setup) setup.style.display = 'none';
+      renderBoardOverlay();
+    }
+    render();
+    // Spectators have no controls
+    if (!myTurnOnline()) {
+      rollButton.disabled = true;
+      nextTurnButton.disabled = true;
+      rollResult.textContent = `Waiting for ${players[currentPlayerIndex]?.name || 'other player'}…`;
+    } else {
+      rollResult.textContent = '';
+      rollButton.disabled = false;
+      nextTurnButton.disabled = true;
+    }
+  } finally {
+    applyingRemoteSnapshot = false;
+  }
 }
 
 function getBattleRolls(starter, opponentStarter) {
@@ -1090,6 +1212,8 @@ async function battleIfNeeded(player) {
 
 async function handleRoll() {
   if (rollButton.disabled) return;
+  if (isOnline() && !myTurnOnline()) return; // ignore stray clicks from spectators
+  await prefetchDiceIfOnline(24);
   rollButton.disabled = true;
   const player = players[currentPlayerIndex];
 
@@ -1649,6 +1773,7 @@ function resetGame() {
   players = [];
   currentPlayerIndex = 0;
   gameStarted = false;
+  gameLogEntries = [];
   gameState.textContent = 'Set up the game to begin.';
   rollButton.disabled = true;
   nextTurnButton.disabled = true;
@@ -1746,12 +1871,17 @@ playerCountSelect.addEventListener('change', () => {
   createPlayerRows(Number(playerCountSelect.value));
 });
 
-startButton.addEventListener('click', () => startGame());
-rollButton.addEventListener('click', () => handleRoll());
-nextTurnButton.addEventListener('click', () => nextTurn());
+startButton.addEventListener('click', () => {
+  // The local "Start Game" button only starts a local game. Online games are
+  // started by the host via the separate "Start Game" button next to the roster.
+  startGame();
+});
+rollButton.addEventListener('click', () => handleRoll().then(() => schedulePushState()));
+nextTurnButton.addEventListener('click', () => { nextTurn(); schedulePushState(); });
 resetButton.addEventListener('click', () => {
   if (confirm('Are you sure you want to reset the game?')) {
     resetGame();
+    schedulePushState();
   }
 });
 
@@ -1759,3 +1889,189 @@ setUpBoardPositions();
 createPlayerRows(Number(playerCountSelect.value));
 renderBoardOverlay();
 updateStatus();
+
+// ─── Lobby + network bootstrap ───
+function buildPlayerObject(index, name, starter) {
+  return {
+    id: index,
+    name: (name || `Player ${index + 1}`).toString().slice(0, 20),
+    starter: starter || 'Charmander',
+    position: 0,
+    initial: (name || '').toString().trim().charAt(0).toUpperCase() || `P${index + 1}`,
+    activeGreyRule: null,
+    greySectionEnd: null,
+    skipNextTurn: false,
+    extraTurn: false,
+    nextTurnHalved: false,
+    nextTurnDoubled: false,
+    awaitingLuckyRoll: false,
+    luckyRollSpace: null,
+    turnsToSkip: 0,
+    drinksPerSkippedTurn: 0,
+    landedOn21: false,
+    awaitingPlayerChoice: false,
+    choiceSpace: null,
+    awaitingTurn32Roll: false,
+    turn32Roll: null,
+    awaitingEvolution: false,
+    awaitingConfusionChoice: false,
+    confused: false,
+    confusedBy: null,
+    awaitingNumberPick: false,
+    pickedNumber: null,
+    missingnoRollsLeft: 0,
+    awaitingFavoritePokemonChoice: false,
+    favoritePokemonOnBoard: null,
+    legendaryBirdsCaught: 0,
+    catchingLegendaryBirds: false,
+    stuckOnEliteFour: false,
+    awaitingDrinkQuestion: false,
+    championGaryCleared: false,
+    finished: false,
+    awaitingSpace18Roll: false,
+    awaitingSpace18DrinksRoll: false,
+    space18TurnsMissed: 0,
+    awaitingSpace19Roll: false,
+    awaitingSafariMovementRoll: false,
+    awaitingChuggingChoice: false,
+    awaitingChuggingResult: false,
+    chuggingOpponent: null,
+    awaitingSpace30Roll: false,
+    awaitingSpace40Roll: false,
+    awaitingSpace49Roll: false,
+    awaitingSpace51Roll: false,
+    awaitingSpace58Roll: false,
+    space58EvenCount: 0,
+    awaitingSpace62Roll: false,
+    awaitingSpace42DrinkRoll: false,
+    justEvolved: false
+  };
+}
+
+function startGameFromRoster(roster) {
+  players = roster.map((p, i) => buildPlayerObject(i, p.name, p.starter));
+  currentPlayerIndex = 0;
+  gameStarted = true;
+  gameLogEntries = [];
+  document.querySelector('.game-setup').style.display = 'none';
+  renderBoardOverlay();
+  refreshBoardTokens();
+  updateStatus();
+  gameLog.innerHTML = '';
+  rollButton.disabled = false;
+  nextTurnButton.disabled = true;
+  gameState.textContent = `Game started with ${players.length} player${players.length > 1 ? 's' : ''}.`;
+  logLine('Game started. Pallet Town is the starting position.');
+}
+
+(function initLobby() {
+  const modeCreateBtn = document.getElementById('mode-create');
+  const modeJoinBtn = document.getElementById('mode-join');
+  const modeLocalBtn = document.getElementById('mode-local');
+  const formCreate = document.getElementById('mode-create-form');
+  const formJoin = document.getElementById('mode-join-form');
+  const formLocal = document.getElementById('mode-local-form');
+
+  const nameCreate = document.getElementById('online-name-create');
+  const starterCreate = document.getElementById('online-starter-create');
+  const nameJoin = document.getElementById('online-name-join');
+  const starterJoin = document.getElementById('online-starter-join');
+  const joinCode = document.getElementById('join-code');
+  const createBtn = document.getElementById('create-room-btn');
+  const joinBtn = document.getElementById('join-room-btn');
+
+  const statusEl = document.getElementById('online-status');
+  const rosterEl = document.getElementById('online-roster');
+  const rosterList = document.getElementById('online-roster-list');
+  const hostHint = document.getElementById('online-host-hint');
+  const startOnlineBtn = document.getElementById('start-game-online');
+
+  function setStatus(msg) { if (statusEl) statusEl.textContent = msg; }
+
+  function showMode(which) {
+    [formCreate, formJoin, formLocal].forEach((f) => f && f.classList.add('hidden'));
+    [modeCreateBtn, modeJoinBtn, modeLocalBtn].forEach((b) => b && b.classList.remove('active'));
+    if (which === 'create') { formCreate?.classList.remove('hidden'); modeCreateBtn?.classList.add('active'); }
+    if (which === 'join')   { formJoin?.classList.remove('hidden');   modeJoinBtn?.classList.add('active'); }
+    if (which === 'local')  { formLocal?.classList.remove('hidden');  modeLocalBtn?.classList.add('active'); }
+  }
+
+  modeCreateBtn?.addEventListener('click', () => {
+    if (!window.net) { setStatus('Online play unavailable (server not reachable).'); return; }
+    showMode('create');
+  });
+  modeJoinBtn?.addEventListener('click', () => {
+    if (!window.net) { setStatus('Online play unavailable (server not reachable).'); return; }
+    showMode('join');
+  });
+  modeLocalBtn?.addEventListener('click', () => showMode('local'));
+
+  if (!window.net) return; // offline-only: skip online wiring
+
+  async function doCreate() {
+    try {
+      const name = (nameCreate?.value || '').trim() || 'Player 1';
+      const starter = starterCreate?.value || 'Charmander';
+      const res = await window.net.createRoom({ name, starter });
+      setStatus(`Room created: ${res.code}. Share this code with friends.`);
+      enterOnlineLobby(true);
+    } catch (e) { setStatus('Error: ' + e.message); }
+  }
+  async function doJoin() {
+    try {
+      const name = (nameJoin?.value || '').trim() || 'Player';
+      const starter = starterJoin?.value || 'Charmander';
+      const code = (joinCode?.value || '').trim().toUpperCase();
+      if (!code) { setStatus('Enter a room code first.'); return; }
+      const res = await window.net.joinRoom({ code, name, starter });
+      setStatus(`Joined room ${res.code}.`);
+      enterOnlineLobby(false);
+    } catch (e) { setStatus('Error: ' + e.message); }
+  }
+
+  function enterOnlineLobby(isHost) {
+    // Hide the mode picker and all forms; the roster + host's start button
+    // are the only things visible while waiting for the game to start.
+    document.getElementById('mode-picker')?.classList.add('hidden');
+    [formCreate, formJoin, formLocal].forEach((f) => f && f.classList.add('hidden'));
+    rosterEl?.classList.remove('hidden');
+    if (startOnlineBtn) {
+      startOnlineBtn.classList.toggle('hidden', !isHost);
+    }
+    if (hostHint) {
+      hostHint.textContent = isHost
+        ? 'You are the host. Click Start Game when everyone is in.'
+        : 'Waiting for the host to start the game…';
+    }
+  }
+
+  createBtn?.addEventListener('click', doCreate);
+  joinBtn?.addEventListener('click', doJoin);
+
+  startOnlineBtn?.addEventListener('click', () => {
+    if (!window.net.players || window.net.players.length === 0) return;
+    startGameFromRoster(window.net.players);
+    window.net.startGame(serializeState()).catch((err) => console.error(err));
+  });
+
+  window.net.onRoom((room) => {
+    if (rosterEl) rosterEl.classList.remove('hidden');
+    if (rosterList) {
+      rosterList.innerHTML = '';
+      room.players.forEach((p) => {
+        const li = document.createElement('li');
+        li.textContent = `${p.name} (${p.starter})`;
+        if (!p.online) li.classList.add('offline');
+        rosterList.appendChild(li);
+      });
+    }
+    // If the host already started the game and we just joined, sync to it.
+    if (room.state && !gameStarted) {
+      applyRemoteSnapshot(room.state);
+    }
+  });
+
+  window.net.onSnapshot((snap) => {
+    applyRemoteSnapshot(snap);
+  });
+})();

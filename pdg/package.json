@@ -4,7 +4,8 @@
   "description": "A turn-based Pokémon board game",
   "main": "game.js",
   "scripts": {
-    "start": "node game.js"
+    "start": "npm --prefix server start",
+    "install:server": "npm --prefix server install"
   },
   "dependencies": {
     "sharp": "^0.34.5",

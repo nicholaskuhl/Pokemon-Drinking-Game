@@ -15,21 +15,83 @@
     <section class="game-setup">
       <div class="panel setup-panel">
         <h2>Player Setup</h2>
-        <label>
-          Number of players:
-          <select id="player-count">
-            <option value="1">1</option>
-            <option value="2" selected>2</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
-            <option value="5">5</option>
-            <option value="6">6</option>
-          </select>
-        </label>
 
-        <div id="player-entries" class="player-entries"></div>
+        <div id="mode-picker" class="mode-picker">
+          <button type="button" id="mode-create" class="mode-btn">Create Room</button>
+          <button type="button" id="mode-join" class="mode-btn">Join Room</button>
+          <button type="button" id="mode-local" class="mode-btn">Start Local Game</button>
+        </div>
 
-        <button id="start-game" class="primary">Start Game</button>
+        <!-- Create Room form -->
+        <div id="mode-create-form" class="mode-form hidden">
+          <h3>Create a new online room</h3>
+          <div class="online-controls">
+            <label>
+              Your name
+              <input type="text" id="online-name-create" placeholder="Your name" />
+            </label>
+            <label>
+              Your starter
+              <select id="online-starter-create">
+                <option value="Charmander">Charmander</option>
+                <option value="Squirtle">Squirtle</option>
+                <option value="Bulbasaur">Bulbasaur</option>
+              </select>
+            </label>
+            <button type="button" id="create-room-btn" class="primary">Create Room</button>
+          </div>
+        </div>
+
+        <!-- Join Room form -->
+        <div id="mode-join-form" class="mode-form hidden">
+          <h3>Join an existing room</h3>
+          <div class="online-controls">
+            <label>
+              Your name
+              <input type="text" id="online-name-join" placeholder="Your name" />
+            </label>
+            <label>
+              Your starter
+              <select id="online-starter-join">
+                <option value="Charmander">Charmander</option>
+                <option value="Squirtle">Squirtle</option>
+                <option value="Bulbasaur">Bulbasaur</option>
+              </select>
+            </label>
+            <label>
+              Room code
+              <input type="text" id="join-code" maxlength="4" placeholder="ABCD" />
+            </label>
+            <button type="button" id="join-room-btn" class="primary">Join Room</button>
+          </div>
+        </div>
+
+        <!-- Local Game form -->
+        <div id="mode-local-form" class="mode-form hidden">
+          <h3>Local game (same device)</h3>
+          <label id="player-count-label">
+            Number of players:
+            <select id="player-count">
+              <option value="1">1</option>
+              <option value="2" selected>2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+            </select>
+          </label>
+          <div id="player-entries" class="player-entries"></div>
+          <button id="start-game" class="primary">Start Game</button>
+        </div>
+
+        <!-- Online status/roster (shown after Create or Join) -->
+        <div id="online-status" class="online-status"></div>
+        <div id="online-roster" class="online-roster hidden">
+          <h4>Players in room</h4>
+          <ul id="online-roster-list"></ul>
+          <p class="hint" id="online-host-hint"></p>
+          <button id="start-game-online" class="primary hidden" type="button">Start Game</button>
+        </div>
       </div>
     </section>
 
@@ -42,10 +104,13 @@
       </div>
 
       <div class="panel control-panel">
-        <h2>Game Controls</h2>
-        <button id="roll-button" disabled>Roll Die</button>
-        <button id="next-turn-button" disabled>End Turn</button>
-        <button id="reset-button">Reset Game</button>
+        <h3>Current Game</h3>
+        <p id="game-state">Set up the game to begin.</p>
+        <div id="current-player-card" class="card hidden">
+          <p><strong>Current turn:</strong> <span id="current-player-name"></span></p>
+          <p><strong>Starter:</strong> <span id="current-player-starter"></span></p>
+          <p><strong>Rule:</strong> <span id="current-grey-rule">None</span></p>
+        </div>
         <div id="dice-roller" class="dice-roller hidden">
           <div class="dice-animation">
             <span class="dice-number">1</span>
@@ -54,14 +119,14 @@
         <div id="roll-result" class="roll-result"></div>
         <div id="player-choice" class="player-choice hidden"></div>
 
-        <h3>Current Game</h3>
-        <p id="game-state">Set up the game to begin.</p>
-        <div id="current-player-card" class="card hidden">
-          <p><strong>Current turn:</strong> <span id="current-player-name"></span></p>
-          <p><strong>Starter:</strong> <span id="current-player-starter"></span></p>
-          <p><strong>Rule:</strong> <span id="current-grey-rule">None</span></p>
-        </div>
+        
         <div id="space-description" class="space-description hidden"></div>
+        <br>
+        <button id="roll-button" disabled>Roll Die</button>
+        <button id="next-turn-button" disabled>End Turn</button>
+        <div style="margin-top: auto; padding-top: 24px;">
+          <button id="reset-button">Reset Game</button>
+        </div>
       </div>
     </section>
 
@@ -80,6 +145,8 @@
     </div>
   </main>
 
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="net.js"></script>
   <script src="game.js"></script>
 </body>
 </html>
